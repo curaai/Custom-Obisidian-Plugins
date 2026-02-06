@@ -1,99 +1,218 @@
-import {App, Editor, MarkdownView, Modal, Notice, Plugin} from 'obsidian';
-import {DEFAULT_SETTINGS, MyPluginSettings, SampleSettingTab} from "./settings";
+import { Plugin, MarkdownView, editorViewField } from "obsidian";
+import {
+	Decoration,
+	DecorationSet,
+	EditorView,
+	ViewPlugin,
+	ViewUpdate,
+	WidgetType,
+} from "@codemirror/view";
+import { RangeSetBuilder } from "@codemirror/state";
+import {
+	FocusGaugeSettings,
+	DEFAULT_SETTINGS,
+	FocusGaugeSettingTab,
+} from "./settings";
 
-// Remember to rename these classes and interfaces!
+// Live Preview용 위젯
+class FocusGaugeWidget extends WidgetType {
+	constructor(private type: string, private value: number, private color: string) {
+		super();
+	}
 
-export default class MyPlugin extends Plugin {
-	settings: MyPluginSettings;
+	toDOM() {
+		const span = document.createElement("span");
+		span.className = `focus-gauge focus-${this.type}`;
+		span.style.setProperty("--value", this.value.toString());
+		span.style.setProperty("--color", this.color);
+		return span;
+	}
+}
+
+// 헤더 체크를 위한 헬퍼 함수
+function isUnderEnabledHeader(
+	view: EditorView,
+	lineNumber: number,
+	enabledHeader: string
+): boolean {
+	if (!enabledHeader) return true;
+
+	// 현재 라인보다 위로 올라가면서 헤더 찾기
+	for (let i = lineNumber; i >= 1; i--) {
+		const line = view.state.doc.line(i);
+		const lineText = line.text.trim();
+
+		// 설정된 헤더를 찾으면 true
+		if (lineText === enabledHeader) {
+			return true;
+		}
+
+		// 다른 헤더를 먼저 만나면 false (더 상위 섹션)
+		if (lineText.startsWith("#") && lineText !== enabledHeader) {
+			// 같은 레벨 또는 상위 레벨 헤더인지 확인
+			const enabledLevel = enabledHeader.match(/^#+/)?.[0].length || 0;
+			const currentLevel = lineText.match(/^#+/)?.[0].length || 0;
+			if (currentLevel <= enabledLevel) {
+				return false;
+			}
+		}
+	}
+
+	return false;
+}
+
+// Live Preview용 ViewPlugin (설정 주입 필요)
+function createFocusGaugePlugin(settings: FocusGaugeSettings) {
+	// 특수 문자 이스케이프 함수
+	const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+	// 설정에서 타입 레이블 추출하여 동적 정규표현식 생성
+	const typeLabels = settings.gaugeTypes.map(t => t.label).join('');
+	const prefix = escapeRegex(settings.syntaxPrefix);
+	const suffix = escapeRegex(settings.syntaxSuffix);
+	const separator = escapeRegex(settings.syntaxSeparator);
+	const regex = new RegExp(`${prefix}([${typeLabels}])${separator}(\\d{1,2})${suffix}`, 'g');
+
+	// 타입-색상 매핑 생성
+	const typeColorMap = new Map(
+		settings.gaugeTypes.map(t => [t.label, t.color])
+	);
+
+	return ViewPlugin.fromClass(
+		class {
+			decorations: DecorationSet;
+
+			constructor(view: EditorView) {
+				this.decorations = this.buildDecorations(view);
+			}
+
+			update(update: ViewUpdate) {
+				if (update.docChanged || update.viewportChanged || update.selectionSet) {
+					this.decorations = this.buildDecorations(update.view);
+				}
+			}
+
+			buildDecorations(view: EditorView): DecorationSet {
+				const builder = new RangeSetBuilder<Decoration>();
+				const cursorPos = view.state.selection.main.head;
+
+				for (const { from, to } of view.visibleRanges) {
+					const text = view.state.doc.sliceString(from, to);
+					let match;
+
+					// regex.lastIndex 초기화
+					regex.lastIndex = 0;
+
+					while ((match = regex.exec(text)) !== null) {
+						const matchStart = from + match.index;
+						const matchEnd = matchStart + match[0].length;
+
+						// 커서가 이 범위 안에 있으면 스킵
+						if (cursorPos >= matchStart && cursorPos <= matchEnd) {
+							continue;
+						}
+
+						const type = match[1]!;
+						const value = Math.min(Math.max(parseInt(match[2]!), 0), 10);
+						const color = typeColorMap.get(type) || '#888888';
+
+						builder.add(
+							matchStart,
+							matchEnd,
+							Decoration.replace({
+								widget: new FocusGaugeWidget(type, value, color),
+							})
+						);
+					}
+				}
+
+				return builder.finish();
+			}
+		},
+		{
+			decorations: (v) => v.decorations,
+		}
+	);
+}
+
+export default class FocusGaugePlugin extends Plugin {
+	settings: FocusGaugeSettings;
+	private editorExtensions: any[] = [];
 
 	async onload() {
 		await this.loadSettings();
+		this.setupExtensions();
 
-		// This creates an icon in the left ribbon.
-		this.addRibbonIcon('dice', 'Sample', (evt: MouseEvent) => {
-			// Called when the user clicks the icon.
-			new Notice('This is a notice!');
-		});
-
-		// This adds a status bar item to the bottom of the app. Does not work on mobile apps.
-		const statusBarItemEl = this.addStatusBarItem();
-		statusBarItemEl.setText('Status bar text');
-
-		// This adds a simple command that can be triggered anywhere
-		this.addCommand({
-			id: 'open-modal-simple',
-			name: 'Open modal (simple)',
-			callback: () => {
-				new SampleModal(this.app).open();
-			}
-		});
-		// This adds an editor command that can perform some operation on the current editor instance
-		this.addCommand({
-			id: 'replace-selected',
-			name: 'Replace selected content',
-			editorCallback: (editor: Editor, view: MarkdownView) => {
-				editor.replaceSelection('Sample editor command');
-			}
-		});
-		// This adds a complex command that can check whether the current state of the app allows execution of the command
-		this.addCommand({
-			id: 'open-modal-complex',
-			name: 'Open modal (complex)',
-			checkCallback: (checking: boolean) => {
-				// Conditions to check
-				const markdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
-				if (markdownView) {
-					// If checking is true, we're simply "checking" if the command can be run.
-					// If checking is false, then we want to actually perform the operation.
-					if (!checking) {
-						new SampleModal(this.app).open();
-					}
-
-					// This command will only show up in Command Palette when the check function returns true
-					return true;
-				}
-				return false;
-			}
-		});
-
-		// This adds a settings tab so the user can configure various aspects of the plugin
-		this.addSettingTab(new SampleSettingTab(this.app, this));
-
-		// If the plugin hooks up any global DOM events (on parts of the app that doesn't belong to this plugin)
-		// Using this function will automatically remove the event listener when this plugin is disabled.
-		this.registerDomEvent(document, 'click', (evt: MouseEvent) => {
-			new Notice("Click");
-		});
-
-		// When registering intervals, this function will automatically clear the interval when the plugin is disabled.
-		this.registerInterval(window.setInterval(() => console.log('setInterval'), 5 * 60 * 1000));
-
+		// 설정 탭 추가
+		this.addSettingTab(new FocusGaugeSettingTab(this.app, this));
 	}
 
-	onunload() {
+	setupExtensions() {
+		// Live Preview (편집 모드)용
+		this.registerEditorExtension(createFocusGaugePlugin(this.settings));
+
+		// Reading View (읽기 모드)용
+		this.registerMarkdownPostProcessor((element) => {
+			// 특수 문자 이스케이프 함수
+			const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+			// 동적 정규표현식 생성
+			const typeLabels = this.settings.gaugeTypes.map(t => t.label).join('');
+			const prefix = escapeRegex(this.settings.syntaxPrefix);
+			const suffix = escapeRegex(this.settings.syntaxSuffix);
+			const separator = escapeRegex(this.settings.syntaxSeparator);
+			const regex = new RegExp(`${prefix}([${typeLabels}])${separator}(\\d{1,2})${suffix}`, 'g');
+			const typeColorMap = new Map(
+				this.settings.gaugeTypes.map(t => [t.label, t.color])
+			);
+
+			// 모든 텍스트 노드를 순회
+			const walker = document.createTreeWalker(
+				element,
+				NodeFilter.SHOW_TEXT,
+				null
+			);
+
+			const nodes: Text[] = [];
+			let node = walker.nextNode();
+			while (node) {
+				nodes.push(node as Text);
+				node = walker.nextNode();
+			}
+
+			for (const textNode of nodes) {
+				const text = textNode.nodeValue!;
+				if (regex.test(text)) {
+					const span = document.createElement("span");
+
+					// HTML 생성
+					regex.lastIndex = 0;
+					span.innerHTML = text.replace(regex, (_, type, v) => {
+						const value = Math.min(Math.max(parseInt(v), 0), 10);
+						const color = typeColorMap.get(type) || '#888888';
+						return `<span class="focus-gauge focus-${type}" style="--value:${value}; --color:${color}"></span>`;
+					});
+
+					textNode.replaceWith(span);
+				}
+			}
+		});
+	}
+
+	refreshExtension() {
+		// 에디터 새로고침을 위해 workspace를 다시 로드
+		this.app.workspace.updateOptions();
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<MyPluginSettings>);
+		this.settings = Object.assign(
+			{},
+			DEFAULT_SETTINGS,
+			await this.loadData()
+		);
 	}
 
 	async saveSettings() {
 		await this.saveData(this.settings);
-	}
-}
-
-class SampleModal extends Modal {
-	constructor(app: App) {
-		super(app);
-	}
-
-	onOpen() {
-		let {contentEl} = this;
-		contentEl.setText('Woah!');
-	}
-
-	onClose() {
-		const {contentEl} = this;
-		contentEl.empty();
 	}
 }

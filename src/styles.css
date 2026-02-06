@@ -1,0 +1,42 @@
+/* focus-gauge styles */
+.focus-gauge {
+	--size: 1.2em;
+	--value: 0;
+	--color: #bbb;
+
+	display: inline-grid;
+	place-items: center;
+	width: var(--size);
+	height: var(--size);
+	border-radius: 50%;
+	font-size: 0.65em;
+	font-weight: 600;
+	margin: 0 2px;
+	vertical-align: middle;
+	background:
+		conic-gradient(var(--color) calc(var(--value) * 10%),
+			var(--bg) 0);
+	color: var(--color);
+}
+
+.focus-gauge::before {
+	content: "";
+	width: calc(100% - 6px);
+	height: calc(100% - 6px);
+	background: var(--inner-bg);
+	border-radius: 50%;
+}
+
+.theme-dark .focus-gauge {
+	--bg: #2a2a2a;
+	--inner-bg: #1e1e1e;
+}
+
+.theme-light .focus-gauge {
+	--bg: #e9ecef;
+	--inner-bg: #fff;
+}
+
+.focus-gauge span {
+	position: absolute;
+}
