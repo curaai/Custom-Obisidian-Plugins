@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from "fs";
+import { execSync } from "child_process";
 
 // Get release type from command line argument (patch, minor, major)
 const releaseType = process.argv[2] || 'patch';
@@ -43,6 +44,14 @@ const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 pkg.version = newVersion;
 writeFileSync("package.json", JSON.stringify(pkg, null, "\t"));
 console.log('✓ package.json updated');
+
+// Update package-lock.json
+try {
+	execSync('npm install --package-lock-only', { stdio: 'inherit' });
+	console.log('✓ package-lock.json updated');
+} catch (error) {
+	console.warn('⚠ Failed to update package-lock.json');
+}
 
 console.log(`\n🚀 Release ${newVersion} prepared!`);
 console.log('Next steps:');

@@ -13,6 +13,7 @@ import {
 	DEFAULT_SETTINGS,
 	FocusGaugeSettingTab,
 } from "./settings";
+import { collapseTimeBlocksExceptCurrent } from "./timeBlockCollapse";
 
 // Live Preview용 위젯
 class FocusGaugeWidget extends WidgetType {
@@ -37,20 +38,22 @@ function isUnderEnabledHeader(
 ): boolean {
 	if (!enabledHeader) return true;
 
+	const trimmedHeader = enabledHeader.trim();
+
 	// 현재 라인보다 위로 올라가면서 헤더 찾기
 	for (let i = lineNumber; i >= 1; i--) {
 		const line = view.state.doc.line(i);
 		const lineText = line.text.trim();
 
-		// 설정된 헤더를 찾으면 true
-		if (lineText === enabledHeader) {
+		// 설정된 헤더를 찾으면 true (양쪽 trim하여 비교)
+		if (lineText === trimmedHeader) {
 			return true;
 		}
 
 		// 다른 헤더를 먼저 만나면 false (더 상위 섹션)
-		if (lineText.startsWith("#") && lineText !== enabledHeader) {
+		if (lineText.startsWith("#") && lineText !== trimmedHeader) {
 			// 같은 레벨 또는 상위 레벨 헤더인지 확인
-			const enabledLevel = enabledHeader.match(/^#+/)?.[0].length || 0;
+			const enabledLevel = trimmedHeader.match(/^#+/)?.[0].length || 0;
 			const currentLevel = lineText.match(/^#+/)?.[0].length || 0;
 			if (currentLevel <= enabledLevel) {
 				return false;
@@ -112,6 +115,12 @@ function createFocusGaugePlugin(settings: FocusGaugeSettings) {
 							continue;
 						}
 
+						// enabledHeader 하위에 있는지 확인
+						const lineNumber = view.state.doc.lineAt(matchStart).number;
+						if (!isUnderEnabledHeader(view, lineNumber, settings.enabledHeader)) {
+							continue;
+						}
+
 						const type = match[1]!;
 						const value = Math.min(Math.max(parseInt(match[2]!), 0), 10);
 						const color = typeColorMap.get(type) || '#888888';
@@ -138,6 +147,7 @@ function createFocusGaugePlugin(settings: FocusGaugeSettings) {
 export default class FocusGaugePlugin extends Plugin {
 	settings: FocusGaugeSettings;
 	private editorExtensions: any[] = [];
+	private autoCollapseTimeout: NodeJS.Timeout | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -145,6 +155,42 @@ export default class FocusGaugePlugin extends Plugin {
 
 		// 설정 탭 추가
 		this.addSettingTab(new FocusGaugeSettingTab(this.app, this));
+
+		// 시간 블록 접기 명령어 추가
+		this.addCommand({
+			id: 'collapse-time-blocks-except-current',
+			name: '현재 시간 외 타임블록 접기',
+			callback: () => {
+				collapseTimeBlocksExceptCurrent(this.app, this.settings);
+			}
+		});
+
+		// 파일이 열릴 때 자동으로 시간 블록 접기
+		this.registerEvent(
+			this.app.workspace.on('file-open', (file) => {
+				if (this.settings.autoCollapseTimeBlocks && file) {
+					// 짧은 딜레이 후 실행 (파일이 완전히 로드되고 렌더링된 후)
+					if (this.autoCollapseTimeout) {
+						clearTimeout(this.autoCollapseTimeout);
+					}
+					this.autoCollapseTimeout = setTimeout(() => {
+						collapseTimeBlocksExceptCurrent(this.app, this.settings, true);
+					}, 300);
+				}
+			})
+		);
+
+		// 윈도우가 포커스될 때 자동으로 시간 블록 접기
+		this.registerDomEvent(window, 'focus', () => {
+			if (this.settings.autoCollapseTimeBlocks) {
+				if (this.autoCollapseTimeout) {
+					clearTimeout(this.autoCollapseTimeout);
+				}
+				this.autoCollapseTimeout = setTimeout(() => {
+					collapseTimeBlocksExceptCurrent(this.app, this.settings, true);
+				}, 300);
+			}
+		});
 	}
 
 	setupExtensions() {
@@ -152,7 +198,46 @@ export default class FocusGaugePlugin extends Plugin {
 		this.registerEditorExtension(createFocusGaugePlugin(this.settings));
 
 		// Reading View (읽기 모드)용
-		this.registerMarkdownPostProcessor((element) => {
+		this.registerMarkdownPostProcessor((element, context) => {
+			// enabledHeader가 설정되어 있으면 해당 섹션인지 확인
+			if (this.settings.enabledHeader) {
+				const trimmedHeader = this.settings.enabledHeader.trim();
+
+				// element의 부모들을 거슬러 올라가며 헤더 찾기
+				let currentElement = element as HTMLElement;
+				let foundHeader = false;
+
+				// 섹션 정보 확인
+				const sectionInfo = context.getSectionInfo(element);
+				if (sectionInfo) {
+					const fileContent = context.sourcePath;
+					// 파일의 해당 라인들을 확인하여 헤더 하위인지 판단
+					// Reading View에서는 정확한 체크가 어려우므로 일단 스킵
+					// Live Preview에서만 정확하게 동작하도록 함
+				}
+
+				// 간단한 체크: 상위 헤딩 요소 찾기
+				while (currentElement && currentElement !== document.body) {
+					if (currentElement.previousElementSibling) {
+						const prev = currentElement.previousElementSibling;
+						if (prev.tagName && prev.tagName.match(/^H[1-6]$/)) {
+							const headerText = prev.textContent?.trim() || '';
+							if (headerText === trimmedHeader) {
+								foundHeader = true;
+								break;
+							}
+							// 다른 헤더를 만나면 false
+							break;
+						}
+					}
+					currentElement = currentElement.parentElement as HTMLElement;
+				}
+
+				if (!foundHeader) {
+					return; // enabledHeader 섹션이 아니면 처리 안 함
+				}
+			}
+
 			// 특수 문자 이스케이프 함수
 			const escapeRegex = (str: string) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -210,6 +295,10 @@ export default class FocusGaugePlugin extends Plugin {
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
+		// enabledHeader의 앞뒤 공백 제거
+		if (this.settings.enabledHeader) {
+			this.settings.enabledHeader = this.settings.enabledHeader.trim();
+		}
 	}
 
 	async saveSettings() {

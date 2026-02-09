@@ -13,10 +13,12 @@ export interface FocusGaugeSettings {
 	syntaxPrefix: string;   // 시작 문자 (예: [, {, <)
 	syntaxSuffix: string;   // 끝 문자 (예: ], }, >)
 	syntaxSeparator: string; // 구분자 (예: 공백, :, -)
+	autoCollapseTimeBlocks: boolean; // 자동으로 시간 블록 접기
+	autoCreateTimeBlock: boolean; // 현재 시간 블록이 없으면 자동 생성
 }
 
 export const DEFAULT_SETTINGS: FocusGaugeSettings = {
-	enabledHeader: '## TimeBlocks',
+	enabledHeader: '## Time Blocks',
 	gaugeTypes: [
 		{ label: 'C', name: 'Concentration', color: '#b388ff' },
 		{ label: 'W', name: 'Work', color: '#4dabf7' },
@@ -25,7 +27,9 @@ export const DEFAULT_SETTINGS: FocusGaugeSettings = {
 	],
 	syntaxPrefix: '[',
 	syntaxSuffix: ']',
-	syntaxSeparator: ' '
+	syntaxSeparator: ' ',
+	autoCollapseTimeBlocks: true,
+	autoCreateTimeBlock: true
 }
 
 export class FocusGaugeSettingTab extends PluginSettingTab {
@@ -48,7 +52,27 @@ export class FocusGaugeSettingTab extends PluginSettingTab {
 				.setPlaceholder('## TimeBlocks')
 				.setValue(this.plugin.settings.enabledHeader)
 				.onChange(async (value) => {
-					this.plugin.settings.enabledHeader = value;
+					this.plugin.settings.enabledHeader = value.trim();
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('자동 시간 블록 접기')
+			.setDesc('Daily Note를 열 때 현재 시간 외의 타임블록을 자동으로 접습니다.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.autoCollapseTimeBlocks)
+				.onChange(async (value) => {
+					this.plugin.settings.autoCollapseTimeBlocks = value;
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('현재 시간 블록 자동 생성')
+			.setDesc('Daily Note를 열 때 현재 시간 블록이 없으면 자동으로 생성합니다.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.autoCreateTimeBlock)
+				.onChange(async (value) => {
+					this.plugin.settings.autoCreateTimeBlock = value;
 					await this.plugin.saveSettings();
 				}));
 
