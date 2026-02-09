@@ -121,7 +121,7 @@ async function createCurrentTimeBlock(
 ): Promise<boolean> {
 	const lineCount = editor.lineCount();
 	let headerLine = -1;
-	const existingBlocks: { line: number; hour: number }[] = [];
+	const existingBlocks: { line: number; hour: number; indent: number }[] = [];
 
 	for (let i = 0; i < lineCount; i++) {
 		const lineText = editor.getLine(i);
@@ -137,7 +137,8 @@ async function createCurrentTimeBlock(
 			if (match && match[1]) {
 				const hour = parseInt(match[1]);
 				if (hour >= 0 && hour <= 23) {
-					existingBlocks.push({ line: i, hour });
+					const indent = lineText.search(/\S/);
+					existingBlocks.push({ line: i, hour, indent });
 				}
 			}
 
@@ -151,11 +152,45 @@ async function createCurrentTimeBlock(
 	if (existingBlocks.some(block => block.hour === currentHour)) return false;
 
 	let insertLine = headerLine + 1;
-	for (const block of existingBlocks) {
-		if (block.hour < currentHour) {
-			insertLine = block.line + 1;
+	let lastBlockBeforeCurrent = -1;
+
+	// 현재 시간보다 작은 시간 블록 중 가장 마지막 블록 찾기
+	for (let i = 0; i < existingBlocks.length; i++) {
+		const block = existingBlocks[i];
+		if (block && block.hour < currentHour) {
+			lastBlockBeforeCurrent = i;
 		} else {
 			break;
+		}
+	}
+
+	// 해당 블록과 그 하위 항목들의 마지막 줄 찾기
+	if (lastBlockBeforeCurrent !== -1) {
+		const block = existingBlocks[lastBlockBeforeCurrent];
+		if (block) {
+			insertLine = block.line + 1;
+			const blockIndent = block.indent;
+
+			// 다음 시간 블록 또는 다른 헤더가 나올 때까지 하위 항목 건너뛰기
+			const nextBlockLine = existingBlocks[lastBlockBeforeCurrent + 1]?.line ?? lineCount;
+
+			for (let j = block.line + 1; j < nextBlockLine && j < lineCount; j++) {
+				const lineText = editor.getLine(j);
+				const trimmedLine = lineText.trim();
+
+				// 빈 줄이 아니고
+				if (trimmedLine !== "") {
+					const lineIndent = lineText.search(/\S/);
+					// 들여쓰기가 더 깊으면 (하위 항목이면) 계속 진행
+					if (lineIndent > blockIndent) {
+						insertLine = j + 1;
+					} else {
+						// 같거나 작은 들여쓰기를 만나면 중단
+						break;
+					}
+				}
+				// 빈 줄은 건너뛰되 insertLine은 유지
+			}
 		}
 	}
 
