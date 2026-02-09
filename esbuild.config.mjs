@@ -10,13 +10,30 @@ if you want to view the source, please visit the github repository of this plugi
 */
 `;
 
-const prod = (process.argv[2] === "production");
-const buildDir = "build";
+// 커맨드 라인 인자 파싱
+const args = process.argv.slice(2);
+const prod = args.includes("production");
+
+// buildDir 인자 찾기: --outdir=<path> 또는 --outdir <path> 형식
+let buildDir = "./build"; // 기본값
+const outdirArgIndex = args.findIndex(arg => arg.startsWith("--outdir"));
+if (outdirArgIndex !== -1) {
+	const outdirArg = args[outdirArgIndex];
+	if (outdirArg.includes("=")) {
+		// --outdir=./path 형식
+		buildDir = outdirArg.split("=")[1];
+	} else if (args[outdirArgIndex + 1]) {
+		// --outdir ./path 형식
+		buildDir = args[outdirArgIndex + 1];
+	}
+}
 
 // build 디렉토리 생성
 if (!fs.existsSync(buildDir)) {
 	fs.mkdirSync(buildDir, { recursive: true });
 }
+
+console.log(`Building to: ${buildDir}`);
 
 const context = await esbuild.context({
 	banner: {
