@@ -1,7 +1,7 @@
 {
 	"id": "curaai-custom-plugin",
 	"name": "Curaai Custom Plugin",
-	"version": "0.0.4",
+	"version": "0.0.6",
 	"minAppVersion": "0.15.0",
 	"description": "",
 	"author": "Obsidian",

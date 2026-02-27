@@ -74,11 +74,14 @@ function createFocusGaugePlugin(settings: FocusGaugeSettings) {
 	const prefix = escapeRegex(settings.syntaxPrefix);
 	const suffix = escapeRegex(settings.syntaxSuffix);
 	const separator = escapeRegex(settings.syntaxSeparator);
-	const regex = new RegExp(`${prefix}([${typeLabels}])${separator}(\\d{1,2})${suffix}`, 'g');
+	const regex = new RegExp(`${prefix}([${typeLabels}])${separator}(\\d{1,2})${suffix}`, 'gi');
 
-	// 타입-색상 매핑 생성
+	// 타입-색상 매핑 생성 (대소문자 모두 지원)
 	const typeColorMap = new Map(
-		settings.gaugeTypes.map(t => [t.label, t.color])
+		settings.gaugeTypes.flatMap(t => [
+			[t.label.toUpperCase(), t.color],
+			[t.label.toLowerCase(), t.color]
+		])
 	);
 
 	return ViewPlugin.fromClass(
@@ -246,9 +249,12 @@ export default class FocusGaugePlugin extends Plugin {
 			const prefix = escapeRegex(this.settings.syntaxPrefix);
 			const suffix = escapeRegex(this.settings.syntaxSuffix);
 			const separator = escapeRegex(this.settings.syntaxSeparator);
-			const regex = new RegExp(`${prefix}([${typeLabels}])${separator}(\\d{1,2})${suffix}`, 'g');
+			const regex = new RegExp(`${prefix}([${typeLabels}])${separator}(\\d{1,2})${suffix}`, 'gi');
 			const typeColorMap = new Map(
-				this.settings.gaugeTypes.map(t => [t.label, t.color])
+				this.settings.gaugeTypes.flatMap(t => [
+					[t.label.toUpperCase(), t.color],
+					[t.label.toLowerCase(), t.color]
+				])
 			);
 
 			// 모든 텍스트 노드를 순회

@@ -2,12 +2,15 @@ import { App, MarkdownView, Notice, TFile, Editor } from "obsidian";
 import { getDailyNote, getAllDailyNotes } from "obsidian-daily-notes-interface";
 import { FocusGaugeSettings } from "./settings";
 import { foldable, foldEffect } from "@codemirror/language";
+import { CurrentTimeCursorFocus } from "./currentTimeCursorFocus";
 
 interface TimeBlock {
 	line: number;
 	time: string;
 	indent: number;
 }
+
+const currentTimeCursorFocus = new CurrentTimeCursorFocus();
 
 function isTodayNote(file: TFile): boolean {
 	try {
@@ -304,13 +307,7 @@ export async function collapseTimeBlocksExceptCurrent(
 		}
 	}
 
-	if (currentBlockIndex !== -1) {
-		const currentBlock = timeBlocks[currentBlockIndex];
-		if (currentBlock) {
-			const lineText = editor.getLine(currentBlock.line);
-			editor.setCursor({ line: currentBlock.line, ch: lineText.length });
-		}
-	}
+	currentTimeCursorFocus.focus(editor, timeBlocks, currentBlockIndex);
 
 	if (!silent) {
 		const now = new Date();
