@@ -1,7 +1,7 @@
 import { App, MarkdownView, Notice, TFile, Editor } from "obsidian";
 import { getDailyNote, getAllDailyNotes } from "obsidian-daily-notes-interface";
 import { FocusGaugeSettings } from "./settings";
-import { foldable, foldEffect } from "@codemirror/language";
+import { foldable, foldEffect, unfoldEffect } from "@codemirror/language";
 import { CurrentTimeCursorFocus } from "./currentTimeCursorFocus";
 
 interface TimeBlock {
@@ -222,6 +222,48 @@ function hasChildren(
 	return false;
 }
 
+function getTimeBlockLinesWithChildren(editor: Editor, timeBlocks: TimeBlock[]): number[] {
+	const lineCount = editor.lineCount();
+	const lines: number[] = [];
+
+	for (let i = 0; i < timeBlocks.length; i++) {
+		const block = timeBlocks[i];
+		if (!block) continue;
+
+		if (hasChildren(editor, block, timeBlocks[i + 1], lineCount)) {
+			lines.push(block.line);
+		}
+	}
+
+	return lines;
+}
+
+function dispatchFoldEffects(cmEditor: any, lineNumbers: number[], fold: boolean): number {
+	const effects = [];
+
+	for (const lineNum of lineNumbers) {
+		try {
+			const line = cmEditor.state.doc.line(lineNum + 1);
+			const range = foldable(cmEditor.state, line.from, line.to);
+			if (range) {
+				effects.push((fold ? foldEffect : unfoldEffect).of(range));
+			}
+		} catch (error) {
+			// 무시
+		}
+	}
+
+	if (effects.length > 0) {
+		try {
+			cmEditor.dispatch({ effects });
+		} catch (error) {
+			// 무시
+		}
+	}
+
+	return effects.length;
+}
+
 export async function collapseTimeBlocksExceptCurrent(
 	app: App,
 	settings: FocusGaugeSettings,
@@ -234,8 +276,8 @@ export async function collapseTimeBlocksExceptCurrent(
 	}
 
 	const file = activeView.file;
-	if (!file || !isTodayNote(file)) {
-		if (!silent) new Notice("오늘 날짜의 Daily Note가 아닙니다.");
+	if (!file) {
+		if (!silent) new Notice("파일을 찾을 수 없습니다.");
 		return;
 	}
 
@@ -244,6 +286,23 @@ export async function collapseTimeBlocksExceptCurrent(
 
 	if (timeBlocks.length === 0) {
 		if (!silent) new Notice("시간 블록을 찾을 수 없습니다.");
+		return;
+	}
+
+	// @ts-ignore
+	const cmEditor = activeView.editor.cm as any;
+	if (!cmEditor) {
+		if (!silent) new Notice("에디터를 찾을 수 없습니다.");
+		return;
+	}
+
+	if (!isTodayNote(file)) {
+		const linesToUnfold = getTimeBlockLinesWithChildren(editor, timeBlocks);
+		const unfoldedCount = dispatchFoldEffects(cmEditor, linesToUnfold, false);
+
+		if (!silent) {
+			new Notice(`오늘 Daily가 아니어서 ${unfoldedCount}개의 시간 블록을 펼쳤습니다.`);
+		}
 		return;
 	}
 
@@ -260,58 +319,22 @@ export async function collapseTimeBlocksExceptCurrent(
 	}
 
 	const currentBlockIndex = currentBlockResult.index;
-	const linesToFold: number[] = [];
-	const lineCount = editor.lineCount();
-
-	for (let i = 0; i < timeBlocks.length; i++) {
-		if (i === currentBlockIndex) continue;
-
-		const block = timeBlocks[i];
-		if (!block) continue;
-
-		if (hasChildren(editor, block, timeBlocks[i + 1], lineCount)) {
-			linesToFold.push(block.line);
-		}
-	}
+	const currentBlockLine = timeBlocks[currentBlockIndex]?.line;
+	const linesToFold = getTimeBlockLinesWithChildren(editor, timeBlocks)
+		.filter((line) => line !== currentBlockLine);
 
 	if (linesToFold.length === 0) {
 		if (!silent) new Notice("접을 시간 블록이 없습니다.");
 		return;
 	}
 
-	// @ts-ignore
-	const cmEditor = activeView.editor.cm as any;
-	if (!cmEditor) {
-		if (!silent) new Notice("에디터를 찾을 수 없습니다.");
-		return;
-	}
-
-	const effects = [];
-	for (const lineNum of linesToFold) {
-		try {
-			const line = cmEditor.state.doc.line(lineNum + 1);
-			const range = foldable(cmEditor.state, line.from, line.to);
-			if (range) {
-				effects.push(foldEffect.of(range));
-			}
-		} catch (error) {
-			// 무시
-		}
-	}
-
-	if (effects.length > 0) {
-		try {
-			cmEditor.dispatch({ effects });
-		} catch (error) {
-			// 무시
-		}
-	}
+	const foldedCount = dispatchFoldEffects(cmEditor, linesToFold, true);
 
 	currentTimeCursorFocus.focus(editor, timeBlocks, currentBlockIndex);
 
 	if (!silent) {
 		const now = new Date();
 		const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-		new Notice(`${effects.length}개의 시간 블록을 접었습니다. (현재 시간: ${currentTime})`);
+		new Notice(`${foldedCount}개의 시간 블록을 접었습니다. (현재 시간: ${currentTime})`);
 	}
 }
