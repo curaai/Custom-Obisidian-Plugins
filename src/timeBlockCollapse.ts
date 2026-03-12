@@ -198,7 +198,18 @@ async function createCurrentTimeBlock(
 	}
 
 	const newBlockText = `- ${currentHour}`;
-	editor.replaceRange(newBlockText + '\n', { line: insertLine, ch: 0 });
+	let insertionText = newBlockText + '\n';
+
+	// When inserting at EOF and the last line is non-empty, force a leading newline
+	// so the new time block cannot be concatenated to the previous line.
+	if (insertLine >= lineCount && lineCount > 0) {
+		const lastLineText = editor.getLine(lineCount - 1);
+		if (lastLineText.length > 0) {
+			insertionText = '\n' + insertionText;
+		}
+	}
+
+	editor.replaceRange(insertionText, { line: insertLine, ch: 0 });
 	editor.setCursor({ line: insertLine, ch: newBlockText.length });
 
 	return true;
