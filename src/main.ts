@@ -13,7 +13,10 @@ import {
 	DEFAULT_SETTINGS,
 	FocusGaugeSettingTab,
 } from "./settings";
-import { collapseTimeBlocksExceptCurrent } from "./timeBlockCollapse";
+import {
+	collapseTimeBlocksExceptCurrent,
+	focusCursorToCurrentTimeBlockByAnchor,
+} from "./timeBlockCollapse";
 
 // Live Preview용 위젯
 class FocusGaugeWidget extends WidgetType {
@@ -165,6 +168,15 @@ export default class FocusGaugePlugin extends Plugin {
 			name: '현재 시간 외 타임블록 접기',
 			callback: () => {
 				collapseTimeBlocksExceptCurrent(this.app, this.settings);
+			}
+		});
+
+		// 현재 시간 블록의 (c)/(c숫자) 앵커로 커서 이동 명령어 추가
+		this.addCommand({
+			id: 'focus-cursor-to-current-time-block-anchor',
+			name: '커서 기준 가장 가까운 앵커로 이동',
+			callback: () => {
+				focusCursorToCurrentTimeBlockByAnchor(this.app, this.settings);
 			}
 		});
 

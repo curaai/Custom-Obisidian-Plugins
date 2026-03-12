@@ -349,3 +349,33 @@ export async function collapseTimeBlocksExceptCurrent(
 		new Notice(`${foldedCount}개의 시간 블록을 접었습니다. (현재 시간: ${currentTime})`);
 	}
 }
+
+export async function focusCursorToCurrentTimeBlockByAnchor(
+	app: App,
+	settings: FocusGaugeSettings,
+	silent = false
+) {
+	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
+	if (!activeView) {
+		if (!silent) new Notice("활성화된 마크다운 뷰가 없습니다.");
+		return;
+	}
+
+	const editor = activeView.editor;
+	const timeBlocks = findTimeBlocks(editor, settings);
+
+	if (timeBlocks.length === 0) {
+		if (!silent) new Notice("시간 블록을 찾을 수 없습니다.");
+		return;
+	}
+
+	const moved = currentTimeCursorFocus.focusNearestAnchor(editor, timeBlocks);
+	if (!moved) {
+		if (!silent) new Notice("이동할 앵커를 찾을 수 없습니다.");
+		return;
+	}
+
+	if (!silent) {
+		new Notice("커서 기준 가장 가까운 앵커로 이동했습니다.");
+	}
+}
