@@ -1,4 +1,4 @@
-import { Plugin, MarkdownView } from "obsidian";
+import { Editor, Notice, Plugin, MarkdownView } from "obsidian";
 import {
 	Decoration,
 	DecorationSet,
@@ -103,6 +103,7 @@ function createFocusGaugePlugin(settings: FocusGaugeSettings) {
 export default class FocusGaugePlugin extends Plugin {
 	settings: FocusGaugeSettings;
 	private autoArchiveTimeout: NodeJS.Timeout | null = null;
+	private findCharHandler: ((evt: KeyboardEvent) => void) | null = null;
 
 	async onload() {
 		await this.loadSettings();
@@ -115,6 +116,15 @@ export default class FocusGaugePlugin extends Plugin {
 			name: '시간 블록 정리 (Now / Time Blocks 분류)',
 			callback: () => {
 				archiveTimeBlocks(this.app, this.settings);
+			}
+		});
+
+		this.addCommand({
+			id: 'move-cursor-to-char',
+			name: '현재 줄에서 지정한 문자로 커서 이동 (vim 0f{char})',
+			hotkeys: [{ modifiers: ['Alt'], key: 'h' }],
+			editorCallback: (editor) => {
+				this.awaitFindChar(editor);
 			}
 		});
 
@@ -141,6 +151,58 @@ export default class FocusGaugePlugin extends Plugin {
 				}, 300);
 			}
 		});
+	}
+
+	/**
+	 * vim의 `f{char}` 모션처럼, 다음에 입력되는 한 글자를 기다렸다가
+	 * 현재 줄에서 그 글자가 처음 나오는 위치로 커서를 이동시킨다.
+	 */
+	awaitFindChar(editor: Editor) {
+		if (this.findCharHandler) {
+			window.removeEventListener('keydown', this.findCharHandler, true);
+			this.findCharHandler = null;
+		}
+
+		const notice = new Notice('문자 입력 대기 중… (Esc로 취소)', 3000);
+
+		const handler = (evt: KeyboardEvent) => {
+			// 순수 modifier 키 입력은 무시하고 계속 대기한다.
+			if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'AltGraph'].includes(evt.key)) {
+				return;
+			}
+
+			window.removeEventListener('keydown', handler, true);
+			this.findCharHandler = null;
+			notice.hide();
+
+			if (evt.key === 'Escape') {
+				return;
+			}
+
+			if (evt.ctrlKey || evt.altKey || evt.metaKey || evt.key.length !== 1) {
+				return;
+			}
+
+			evt.preventDefault();
+			evt.stopPropagation();
+
+			const cursor = editor.getCursor();
+			const line = editor.getLine(cursor.line);
+			const index = line.indexOf(evt.key);
+			if (index !== -1) {
+				editor.setCursor({ line: cursor.line, ch: index });
+			}
+		};
+
+		this.findCharHandler = handler;
+		window.addEventListener('keydown', handler, true);
+	}
+
+	onunload() {
+		if (this.findCharHandler) {
+			window.removeEventListener('keydown', this.findCharHandler, true);
+			this.findCharHandler = null;
+		}
 	}
 
 	setupExtensions() {
