@@ -2,23 +2,25 @@ import { App, PluginSettingTab, Setting } from "obsidian";
 import FocusGaugePlugin from "./main";
 
 export interface GaugeType {
-	label: string;  // 단일 문자 타입 (C, W, R, L 등)
-	name: string;   // 설명
-	color: string;  // 색상 코드
+	label: string;
+	name: string;
+	color: string;
 }
 
 export interface FocusGaugeSettings {
-	enabledHeader: string;
+	nowHeader: string;
+	timeBlocksHeader: string;
 	gaugeTypes: GaugeType[];
-	syntaxPrefix: string;   // 시작 문자 (예: [, {, <)
-	syntaxSuffix: string;   // 끝 문자 (예: ], }, >)
-	syntaxSeparator: string; // 구분자 (예: 공백, :, -)
-	autoCollapseTimeBlocks: boolean; // 자동으로 시간 블록 접기
-	autoCreateTimeBlock: boolean; // 현재 시간 블록이 없으면 자동 생성
+	syntaxPrefix: string;
+	syntaxSuffix: string;
+	syntaxSeparator: string;
+	autoArchiveTimeBlocks: boolean;
+	autoCreateTimeBlock: boolean;
 }
 
 export const DEFAULT_SETTINGS: FocusGaugeSettings = {
-	enabledHeader: '## Time Blocks',
+	nowHeader: '## 📊 Now',
+	timeBlocksHeader: '## 🕒 Time Blocks',
 	gaugeTypes: [
 		{ label: 'C', name: 'Concentration', color: '#b388ff' },
 		{ label: 'W', name: 'Work', color: '#4dabf7' },
@@ -28,8 +30,8 @@ export const DEFAULT_SETTINGS: FocusGaugeSettings = {
 	syntaxPrefix: '[',
 	syntaxSuffix: ']',
 	syntaxSeparator: ' ',
-	autoCollapseTimeBlocks: true,
-	autoCreateTimeBlock: true
+	autoArchiveTimeBlocks: true,
+	autoCreateTimeBlock: true,
 }
 
 export class FocusGaugeSettingTab extends PluginSettingTab {
@@ -42,33 +44,45 @@ export class FocusGaugeSettingTab extends PluginSettingTab {
 
 	display(): void {
 		const { containerEl } = this;
-
 		containerEl.empty();
 
+		containerEl.createEl('h3', { text: 'Time Block Sections' });
+
 		new Setting(containerEl)
-			.setName('활성화 헤더')
-			.setDesc('이 헤더 이름 하위에서만 Focus Gauge가 동작합니다. 비워두면 모든 곳에서 동작합니다.')
+			.setName('Now 헤더')
+			.setDesc('이전/현재/다음 시간 블록이 표시될 섹션 헤더')
 			.addText(text => text
-				.setPlaceholder('## TimeBlocks')
-				.setValue(this.plugin.settings.enabledHeader)
+				.setPlaceholder('## 📊 Now')
+				.setValue(this.plugin.settings.nowHeader)
 				.onChange(async (value) => {
-					this.plugin.settings.enabledHeader = value.trim();
+					this.plugin.settings.nowHeader = value.trim();
 					await this.plugin.saveSettings();
 				}));
 
 		new Setting(containerEl)
-			.setName('자동 시간 블록 접기')
-			.setDesc('Daily Note를 열 때 현재 시간 외의 타임블록을 자동으로 접습니다.')
-			.addToggle(toggle => toggle
-				.setValue(this.plugin.settings.autoCollapseTimeBlocks)
+			.setName('Time Blocks 헤더')
+			.setDesc('아카이브된 시간 블록이 저장될 섹션 헤더')
+			.addText(text => text
+				.setPlaceholder('## 🕒 Time Blocks')
+				.setValue(this.plugin.settings.timeBlocksHeader)
 				.onChange(async (value) => {
-					this.plugin.settings.autoCollapseTimeBlocks = value;
+					this.plugin.settings.timeBlocksHeader = value.trim();
+					await this.plugin.saveSettings();
+				}));
+
+		new Setting(containerEl)
+			.setName('자동 시간 블록 정리')
+			.setDesc('파일을 열 때 이전/현재/다음 시간 블록을 Now 섹션으로, 나머지는 Time Blocks로 자동 이동합니다.')
+			.addToggle(toggle => toggle
+				.setValue(this.plugin.settings.autoArchiveTimeBlocks)
+				.onChange(async (value) => {
+					this.plugin.settings.autoArchiveTimeBlocks = value;
 					await this.plugin.saveSettings();
 				}));
 
 		new Setting(containerEl)
 			.setName('현재 시간 블록 자동 생성')
-			.setDesc('Daily Note를 열 때 현재 시간 블록이 없으면 자동으로 생성합니다.')
+			.setDesc('현재 시간 블록이 없으면 Now 섹션에 자동으로 생성합니다.')
 			.addToggle(toggle => toggle
 				.setValue(this.plugin.settings.autoCreateTimeBlock)
 				.onChange(async (value) => {
@@ -117,7 +131,7 @@ export class FocusGaugeSettingTab extends PluginSettingTab {
 		containerEl.createEl('h3', { text: 'Gauge Types' });
 
 		this.plugin.settings.gaugeTypes.forEach((gaugeType, index) => {
-			const setting = new Setting(containerEl)
+			new Setting(containerEl)
 				.setName(`Type: ${gaugeType.label}`)
 				.setDesc(gaugeType.name)
 				.addText(text => text

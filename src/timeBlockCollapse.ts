@@ -1,16 +1,23 @@
 import { App, MarkdownView, Notice, TFile, Editor } from "obsidian";
 import { getDailyNote, getAllDailyNotes } from "obsidian-daily-notes-interface";
 import { FocusGaugeSettings } from "./settings";
-import { foldable, foldEffect, unfoldEffect } from "@codemirror/language";
-import { CurrentTimeCursorFocus } from "./currentTimeCursorFocus";
 
-interface TimeBlock {
-	line: number;
-	time: string;
-	indent: number;
+interface TimeBlockEntry {
+	hour: number;
+	lines: string[];
 }
 
-const currentTimeCursorFocus = new CurrentTimeCursorFocus();
+interface SectionBounds {
+	headerLine: number;
+	contentStart: number;
+	contentEnd: number;
+}
+
+interface SectionData {
+	preContent: string[];   // non-time-block lines before first time block
+	entries: TimeBlockEntry[];
+	postContent: string[];  // non-indented code blocks (dataviewjs, etc.) after time blocks
+}
 
 function isTodayNote(file: TFile): boolean {
 	try {
@@ -18,268 +25,152 @@ function isTodayNote(file: TFile): boolean {
 		const today = window.moment();
 		const todayNote = getDailyNote(today, dailyNotes);
 		return todayNote?.path === file.path;
-	} catch (error) {
-		console.error("Daily Notes plugin is not enabled:", error);
+	} catch {
 		return false;
 	}
 }
 
-function isUnderEnabledHeader(
-	editor: Editor,
-	lineNumber: number,
-	enabledHeader: string
-): boolean {
-	if (!enabledHeader) return true;
-
-	for (let i = lineNumber; i >= 0; i--) {
-		const lineText = editor.getLine(i).trim();
-
-		if (lineText === enabledHeader.trim()) {
-			return true;
-		}
-
-		if (lineText.startsWith("#") && lineText !== enabledHeader) {
-			const enabledLevel = enabledHeader.match(/^#+/)?.[0].length || 0;
-			const currentLevel = lineText.match(/^#+/)?.[0].length || 0;
-			if (currentLevel <= enabledLevel) {
-				return false;
-			}
-		}
-	}
-
-	return false;
-}
-
-function parseTimeBlock(line: string): string | null {
-	const match = line.trim().match(/^-\s+(\d+)/);
-	if (match && match[1]) {
+function parseTimeBlockHour(line: string): number | null {
+	const match = line.trim().match(/^-\s+(\d+)$/);
+	if (match && match[1] !== undefined) {
 		const hour = parseInt(match[1]);
-		if (hour >= 0 && hour <= 23) {
-			return String(hour).padStart(2, '0') + ':00';
-		}
+		if (hour >= 0 && hour <= 23) return hour;
 	}
 	return null;
 }
 
-function timeToMinutes(time: string): number {
-	const [hours = '0', minutes = '0'] = time.split(':');
-	return parseInt(hours) * 60 + parseInt(minutes);
-}
-
-function findTimeBlocks(
-	editor: Editor,
-	settings: FocusGaugeSettings
-): TimeBlock[] {
-	const timeBlocks: TimeBlock[] = [];
+function findSectionBounds(editor: Editor, headerText: string): SectionBounds | null {
 	const lineCount = editor.lineCount();
+	const trimmedHeader = headerText.trim();
 
-	for (let i = 0; i < lineCount; i++) {
-		if (!isUnderEnabledHeader(editor, i, settings.enabledHeader)) {
-			continue;
-		}
-
-		const lineText = editor.getLine(i);
-		const time = parseTimeBlock(lineText);
-
-		if (time) {
-			const indent = lineText.search(/\S/);
-			timeBlocks.push({ line: i, time, indent });
-		}
-	}
-
-	return timeBlocks;
-}
-
-function findCurrentBlockIndex(
-	timeBlocks: TimeBlock[],
-	currentHour: number
-): { index: number; exactMatch: boolean } {
-	// 정확히 일치하는 블록 찾기
-	for (let i = 0; i < timeBlocks.length; i++) {
-		const block = timeBlocks[i];
-		if (!block) continue;
-
-		const hourStr = block.time.split(':')[0];
-		if (hourStr && parseInt(hourStr) === currentHour) {
-			return { index: i, exactMatch: true };
-		}
-	}
-
-	// 가장 가까운 이전 블록 찾기
-	const currentMinutes = currentHour * 60;
-	for (let i = timeBlocks.length - 1; i >= 0; i--) {
-		const block = timeBlocks[i];
-		if (block && timeToMinutes(block.time) <= currentMinutes) {
-			return { index: i, exactMatch: false };
-		}
-	}
-
-	return { index: 0, exactMatch: false };
-}
-
-async function createCurrentTimeBlock(
-	editor: Editor,
-	settings: FocusGaugeSettings,
-	currentHour: number
-): Promise<boolean> {
-	const lineCount = editor.lineCount();
 	let headerLine = -1;
-	const existingBlocks: { line: number; hour: number; indent: number }[] = [];
-
 	for (let i = 0; i < lineCount; i++) {
-		const lineText = editor.getLine(i);
-		const trimmedLine = lineText.trim();
-
-		if (trimmedLine === settings.enabledHeader.trim()) {
+		if (editor.getLine(i).trim() === trimmedHeader) {
 			headerLine = i;
-			continue;
-		}
-
-		if (headerLine !== -1) {
-			const match = lineText.trim().match(/^-\s+(\d+)/);
-			if (match && match[1]) {
-				const hour = parseInt(match[1]);
-				if (hour >= 0 && hour <= 23) {
-					const indent = lineText.search(/\S/);
-					existingBlocks.push({ line: i, hour, indent });
-				}
-			}
-
-			if (trimmedLine.startsWith("#") && trimmedLine !== settings.enabledHeader.trim()) {
-				break;
-			}
+			break;
 		}
 	}
+	if (headerLine === -1) return null;
 
-	if (headerLine === -1) return false;
-	if (existingBlocks.some(block => block.hour === currentHour)) return false;
+	const contentStart = headerLine + 1;
+	let contentEnd = lineCount - 1;
 
-	let insertLine = headerLine + 1;
-	let lastBlockBeforeCurrent = -1;
-
-	// 현재 시간보다 작은 시간 블록 중 가장 마지막 블록 찾기
-	for (let i = 0; i < existingBlocks.length; i++) {
-		const block = existingBlocks[i];
-		if (block && block.hour < currentHour) {
-			lastBlockBeforeCurrent = i;
-		} else {
+	for (let i = contentStart; i < lineCount; i++) {
+		const trimmed = editor.getLine(i).trim();
+		if (trimmed.startsWith('#') || trimmed === '---') {
+			contentEnd = i - 1;
 			break;
 		}
 	}
 
-	// 해당 블록과 그 하위 항목들의 마지막 줄 찾기
-	if (lastBlockBeforeCurrent !== -1) {
-		const block = existingBlocks[lastBlockBeforeCurrent];
-		if (block) {
-			insertLine = block.line + 1;
-			const blockIndent = block.indent;
-
-			// 다음 시간 블록 또는 다른 헤더가 나올 때까지 하위 항목 건너뛰기
-			const nextBlockLine = existingBlocks[lastBlockBeforeCurrent + 1]?.line ?? lineCount;
-
-			for (let j = block.line + 1; j < nextBlockLine && j < lineCount; j++) {
-				const lineText = editor.getLine(j);
-				const trimmedLine = lineText.trim();
-
-				// 빈 줄이 아니고
-				if (trimmedLine !== "") {
-					const lineIndent = lineText.search(/\S/);
-					// 들여쓰기가 더 깊으면 (하위 항목이면) 계속 진행
-					if (lineIndent > blockIndent) {
-						insertLine = j + 1;
-					} else {
-						// 같거나 작은 들여쓰기를 만나면 중단
-						break;
-					}
-				}
-				// 빈 줄은 건너뛰되 insertLine은 유지
-			}
-		}
-	}
-
-	const newBlockText = `- ${currentHour}`;
-	let insertionText = newBlockText + '\n';
-
-	// When inserting at EOF and the last line is non-empty, force a leading newline
-	// so the new time block cannot be concatenated to the previous line.
-	if (insertLine >= lineCount && lineCount > 0) {
-		const lastLineText = editor.getLine(lineCount - 1);
-		if (lastLineText.length > 0) {
-			insertionText = '\n' + insertionText;
-		}
-	}
-
-	editor.replaceRange(insertionText, { line: insertLine, ch: 0 });
-	editor.setCursor({ line: insertLine, ch: newBlockText.length });
-
-	return true;
+	return { headerLine, contentStart, contentEnd };
 }
 
-function hasChildren(
+function parseSection(editor: Editor, bounds: SectionBounds): SectionData {
+	const { contentStart, contentEnd } = bounds;
+	const preContent: string[] = [];
+	const entries: TimeBlockEntry[] = [];
+	const postContent: string[] = [];
+
+	if (contentEnd < contentStart) return { preContent, entries, postContent };
+
+	let inCodeBlock = false;
+	let foundFirstTimeBlock = false;
+	let inPostContent = false;
+	let currentEntry: TimeBlockEntry | null = null;
+
+	for (let i = contentStart; i <= contentEnd; i++) {
+		const line = editor.getLine(i);
+		const trimmed = line.trim();
+
+		// Once in postContent mode, collect everything as-is
+		if (inPostContent) {
+			if (trimmed.startsWith('```')) inCodeBlock = !inCodeBlock;
+			postContent.push(line);
+			continue;
+		}
+
+		if (trimmed.startsWith('```')) {
+			// Non-indented code block after time blocks → postContent
+			const lineIndent = line.search(/\S/);
+			if (foundFirstTimeBlock && lineIndent === 0) {
+				if (currentEntry) { entries.push(currentEntry); currentEntry = null; }
+				inCodeBlock = !inCodeBlock;
+				inPostContent = true;
+				postContent.push(line);
+				continue;
+			}
+
+			inCodeBlock = !inCodeBlock;
+			if (!foundFirstTimeBlock) {
+				preContent.push(line);
+			} else if (currentEntry) {
+				currentEntry.lines.push(line);
+			}
+			continue;
+		}
+
+		if (inCodeBlock) {
+			if (!foundFirstTimeBlock) {
+				preContent.push(line);
+			} else if (currentEntry) {
+				currentEntry.lines.push(line);
+			}
+			continue;
+		}
+
+		const hour = parseTimeBlockHour(line);
+		if (hour !== null) {
+			if (currentEntry) entries.push(currentEntry);
+			foundFirstTimeBlock = true;
+			currentEntry = { hour, lines: [line] };
+		} else if (!foundFirstTimeBlock) {
+			preContent.push(line);
+		} else if (currentEntry) {
+			currentEntry.lines.push(line);
+		}
+	}
+
+	if (currentEntry) entries.push(currentEntry);
+
+	return { preContent, entries, postContent };
+}
+
+function replaceSectionContent(
 	editor: Editor,
-	block: TimeBlock,
-	nextBlock: TimeBlock | undefined,
-	lineCount: number
-): boolean {
-	const endLine = nextBlock ? nextBlock.line - 1 : lineCount - 1;
-
-	for (let j = block.line + 1; j <= endLine; j++) {
-		const lineText = editor.getLine(j);
-		if (lineText.trim() !== "" && lineText.search(/\S/) > block.indent) {
-			return true;
-		}
+	bounds: SectionBounds,
+	data: SectionData,
+	entries: TimeBlockEntry[]
+): void {
+	// Time block entries first, then non-time-block content (dataviewjs, etc.)
+	const newLines: string[] = [];
+	for (const entry of entries) {
+		newLines.push(...entry.lines);
 	}
+	newLines.push(...data.preContent);
+	newLines.push(...data.postContent);
+	const newContent = newLines.join('\n');
 
-	return false;
+	if (bounds.contentEnd < bounds.contentStart) {
+		if (newContent) {
+			const headerEnd = editor.getLine(bounds.headerLine).length;
+			editor.replaceRange('\n' + newContent, { line: bounds.headerLine, ch: headerEnd });
+		}
+	} else {
+		// Skip replacement if content is identical — avoids displacing the cursor
+		const existingLines: string[] = [];
+		for (let i = bounds.contentStart; i <= bounds.contentEnd; i++) {
+			existingLines.push(editor.getLine(i));
+		}
+		if (existingLines.join('\n') === newContent) return;
+
+		const startPos = { line: bounds.contentStart, ch: 0 };
+		const endPos = { line: bounds.contentEnd, ch: editor.getLine(bounds.contentEnd).length };
+		editor.replaceRange(newContent, startPos, endPos);
+	}
 }
 
-function getTimeBlockLinesWithChildren(editor: Editor, timeBlocks: TimeBlock[]): number[] {
-	const lineCount = editor.lineCount();
-	const lines: number[] = [];
-
-	for (let i = 0; i < timeBlocks.length; i++) {
-		const block = timeBlocks[i];
-		if (!block) continue;
-
-		if (hasChildren(editor, block, timeBlocks[i + 1], lineCount)) {
-			lines.push(block.line);
-		}
-	}
-
-	return lines;
-}
-
-function dispatchFoldEffects(cmEditor: any, lineNumbers: number[], fold: boolean): number {
-	const effects = [];
-
-	for (const lineNum of lineNumbers) {
-		try {
-			const line = cmEditor.state.doc.line(lineNum + 1);
-			const range = foldable(cmEditor.state, line.from, line.to);
-			if (range) {
-				effects.push((fold ? foldEffect : unfoldEffect).of(range));
-			}
-		} catch (error) {
-			// 무시
-		}
-	}
-
-	if (effects.length > 0) {
-		try {
-			cmEditor.dispatch({ effects });
-		} catch (error) {
-			// 무시
-		}
-	}
-
-	return effects.length;
-}
-
-export async function collapseTimeBlocksExceptCurrent(
-	app: App,
-	settings: FocusGaugeSettings,
-	silent = false
-) {
+export async function archiveTimeBlocks(app: App, settings: FocusGaugeSettings, silent = false): Promise<void> {
 	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
 	if (!activeView) {
 		if (!silent) new Notice("활성화된 마크다운 뷰가 없습니다.");
@@ -293,89 +184,83 @@ export async function collapseTimeBlocksExceptCurrent(
 	}
 
 	const editor = activeView.editor;
-	const timeBlocks = findTimeBlocks(editor, settings);
 
-	if (timeBlocks.length === 0) {
-		if (!silent) new Notice("시간 블록을 찾을 수 없습니다.");
+	const nowBounds = findSectionBounds(editor, settings.nowHeader);
+	const timeBlocksBounds = findSectionBounds(editor, settings.timeBlocksHeader);
+
+	if (!nowBounds && !timeBlocksBounds) {
+		if (!silent) new Notice("Now 또는 Time Blocks 섹션을 찾을 수 없습니다.");
 		return;
 	}
 
-	// @ts-ignore
-	const cmEditor = activeView.editor.cm as any;
-	if (!cmEditor) {
-		if (!silent) new Notice("에디터를 찾을 수 없습니다.");
-		return;
+	const nowData = nowBounds
+		? parseSection(editor, nowBounds)
+		: { preContent: [], entries: [], postContent: [] };
+
+	const timeBlocksData = timeBlocksBounds
+		? parseSection(editor, timeBlocksBounds)
+		: { preContent: [], entries: [], postContent: [] };
+
+	// Merge entries by hour; Now section takes precedence on conflict
+	const hourMap = new Map<number, TimeBlockEntry>();
+	for (const entry of timeBlocksData.entries) {
+		hourMap.set(entry.hour, entry);
+	}
+	for (const entry of nowData.entries) {
+		hourMap.set(entry.hour, entry);
 	}
 
-	if (!isTodayNote(file)) {
-		const linesToUnfold = getTimeBlockLinesWithChildren(editor, timeBlocks);
-		const unfoldedCount = dispatchFoldEffects(cmEditor, linesToUnfold, false);
+	const isToday = isTodayNote(file);
 
-		if (!silent) {
-			new Notice(`오늘 Daily가 아니어서 ${unfoldedCount}개의 시간 블록을 펼쳤습니다.`);
+	let nowEntries: TimeBlockEntry[];
+	let archiveEntries: TimeBlockEntry[];
+
+	if (!isToday) {
+		nowEntries = [];
+		archiveEntries = Array.from(hourMap.values()).sort((a, b) => a.hour - b.hour);
+	} else {
+		const currentHour = new Date().getHours();
+		const prevHour = (currentHour - 1 + 24) % 24;
+		const nextHour = (currentHour + 1) % 24;
+		const nowHours = new Set([prevHour, currentHour, nextHour]);
+
+		if (!hourMap.has(currentHour) && settings.autoCreateTimeBlock) {
+			hourMap.set(currentHour, { hour: currentHour, lines: [`- ${currentHour}`] });
 		}
-		return;
-	}
-
-	const currentHour = new Date().getHours();
-	const currentBlockResult = findCurrentBlockIndex(timeBlocks, currentHour);
-
-	// 정확히 일치하는 블록이 없으면 생성
-	if (!currentBlockResult.exactMatch && settings.autoCreateTimeBlock) {
-		const created = await createCurrentTimeBlock(editor, settings, currentHour);
-		if (created) {
-			if (!silent) new Notice(`${currentHour}시 블록을 생성했습니다.`);
-			return;
+		if (!hourMap.has(nextHour) && settings.autoCreateTimeBlock) {
+			hourMap.set(nextHour, { hour: nextHour, lines: [`- ${nextHour}`] });
 		}
+
+		const all = Array.from(hourMap.values());
+		nowEntries = all.filter(e => nowHours.has(e.hour)).sort((a, b) => a.hour - b.hour);
+		archiveEntries = all.filter(e => !nowHours.has(e.hour)).sort((a, b) => a.hour - b.hour);
 	}
 
-	const currentBlockIndex = currentBlockResult.index;
-	const currentBlockLine = timeBlocks[currentBlockIndex]?.line;
-	const linesToFold = getTimeBlockLinesWithChildren(editor, timeBlocks)
-		.filter((line) => line !== currentBlockLine);
+	// Replace bottom section first to preserve line numbers of top section
+	const nowIsBelow = nowBounds && timeBlocksBounds
+		&& nowBounds.headerLine > timeBlocksBounds.headerLine;
 
-	if (linesToFold.length === 0) {
-		if (!silent) new Notice("접을 시간 블록이 없습니다.");
-		return;
-	}
-
-	const foldedCount = dispatchFoldEffects(cmEditor, linesToFold, true);
-
-	currentTimeCursorFocus.focus(editor, timeBlocks, currentBlockIndex);
-
-	if (!silent) {
-		const now = new Date();
-		const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-		new Notice(`${foldedCount}개의 시간 블록을 접었습니다. (현재 시간: ${currentTime})`);
-	}
-}
-
-export async function focusCursorToCurrentTimeBlockByAnchor(
-	app: App,
-	settings: FocusGaugeSettings,
-	silent = false
-) {
-	const activeView = app.workspace.getActiveViewOfType(MarkdownView);
-	if (!activeView) {
-		if (!silent) new Notice("활성화된 마크다운 뷰가 없습니다.");
-		return;
-	}
-
-	const editor = activeView.editor;
-	const timeBlocks = findTimeBlocks(editor, settings);
-
-	if (timeBlocks.length === 0) {
-		if (!silent) new Notice("시간 블록을 찾을 수 없습니다.");
-		return;
-	}
-
-	const moved = currentTimeCursorFocus.focusNearestAnchor(editor, timeBlocks);
-	if (!moved) {
-		if (!silent) new Notice("이동할 앵커를 찾을 수 없습니다.");
-		return;
+	if (nowBounds && timeBlocksBounds) {
+		if (nowIsBelow) {
+			replaceSectionContent(editor, nowBounds, nowData, nowEntries);
+			replaceSectionContent(editor, timeBlocksBounds, timeBlocksData, archiveEntries);
+		} else {
+			replaceSectionContent(editor, timeBlocksBounds, timeBlocksData, archiveEntries);
+			replaceSectionContent(editor, nowBounds, nowData, nowEntries);
+		}
+	} else if (nowBounds) {
+		replaceSectionContent(editor, nowBounds, nowData, nowEntries);
+	} else if (timeBlocksBounds) {
+		replaceSectionContent(editor, timeBlocksBounds, timeBlocksData, archiveEntries);
 	}
 
 	if (!silent) {
-		new Notice("커서 기준 가장 가까운 앵커로 이동했습니다.");
+		if (!isToday) {
+			new Notice("오늘이 아니어서 Now 블록을 Time Blocks로 이동했습니다.");
+		} else {
+			const now = new Date();
+			const t = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+			new Notice(`시간 블록을 정리했습니다. (현재 시간: ${t})`);
+		}
 	}
 }
