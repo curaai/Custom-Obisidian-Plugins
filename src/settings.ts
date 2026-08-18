@@ -7,6 +7,9 @@ export interface GaugeType {
 	color: string;
 }
 
+/// <summary>
+/// 게이지 문법, Now/Time Blocks 섹션, 줄 내 커서 이동에 쓰는 플러그인 설정입니다.
+/// </summary>
 export interface FocusGaugeSettings {
 	nowHeader: string;
 	timeBlocksHeader: string;
@@ -16,6 +19,7 @@ export interface FocusGaugeSettings {
 	syntaxSeparator: string;
 	autoArchiveTimeBlocks: boolean;
 	autoCreateTimeBlock: boolean;
+	lineNavChar: string;
 }
 
 export const DEFAULT_SETTINGS: FocusGaugeSettings = {
@@ -32,6 +36,7 @@ export const DEFAULT_SETTINGS: FocusGaugeSettings = {
 	syntaxSeparator: ' ',
 	autoArchiveTimeBlocks: true,
 	autoCreateTimeBlock: true,
+	lineNavChar: '[',
 }
 
 export class FocusGaugeSettingTab extends PluginSettingTab {
@@ -87,6 +92,23 @@ export class FocusGaugeSettingTab extends PluginSettingTab {
 				.setValue(this.plugin.settings.autoCreateTimeBlock)
 				.onChange(async (value) => {
 					this.plugin.settings.autoCreateTimeBlock = value;
+					await this.plugin.saveSettings();
+				}));
+
+		containerEl.createEl('h3', { text: 'Cursor' });
+
+		new Setting(containerEl)
+			.setName('줄 내 이동 문자')
+			.setDesc('현재 줄에서 이 문자가 처음 나오는 위치로 커서를 이동합니다. 비우면 명령 실행 후 한 글자를 입력받아 이동합니다.')
+			.addText(text => text
+				.setPlaceholder('[')
+				.setValue(this.plugin.settings.lineNavChar)
+				.onChange(async (value) => {
+					const char = value.slice(0, 1);
+					this.plugin.settings.lineNavChar = char;
+					if (value !== char) {
+						text.setValue(char);
+					}
 					await this.plugin.saveSettings();
 				}));
 

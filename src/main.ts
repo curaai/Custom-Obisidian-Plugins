@@ -121,10 +121,10 @@ export default class FocusGaugePlugin extends Plugin {
 
 		this.addCommand({
 			id: 'move-cursor-to-char',
-			name: '현재 줄에서 지정한 문자로 커서 이동 (vim 0f{char})',
+			name: '현재 줄에서 지정한 문자로 커서 이동',
 			hotkeys: [{ modifiers: ['Alt'], key: 'h' }],
 			editorCallback: (editor) => {
-				this.awaitFindChar(editor);
+				this.moveCursorToNavChar(editor);
 			}
 		});
 
@@ -151,6 +151,25 @@ export default class FocusGaugePlugin extends Plugin {
 				}, 300);
 			}
 		});
+	}
+
+	moveCursorToNavChar(editor: Editor) {
+		const target = this.settings.lineNavChar;
+		if (!target) {
+			this.awaitFindChar(editor);
+			return;
+		}
+
+		this.moveCursorToCharOnLine(editor, target);
+	}
+
+	private moveCursorToCharOnLine(editor: Editor, char: string) {
+		const cursor = editor.getCursor();
+		const line = editor.getLine(cursor.line);
+		const index = line.indexOf(char);
+		if (index !== -1) {
+			editor.setCursor({ line: cursor.line, ch: index });
+		}
 	}
 
 	/**
@@ -186,12 +205,7 @@ export default class FocusGaugePlugin extends Plugin {
 			evt.preventDefault();
 			evt.stopPropagation();
 
-			const cursor = editor.getCursor();
-			const line = editor.getLine(cursor.line);
-			const index = line.indexOf(evt.key);
-			if (index !== -1) {
-				editor.setCursor({ line: cursor.line, ch: index });
-			}
+			this.moveCursorToCharOnLine(editor, evt.key);
 		};
 
 		this.findCharHandler = handler;
