@@ -51,7 +51,7 @@ export class FocusGaugeSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl('h3', { text: 'Time Block Sections' });
+		new Setting(containerEl).setName('Time block sections').setHeading();
 
 		new Setting(containerEl)
 			.setName('Now 헤더')
@@ -95,7 +95,7 @@ export class FocusGaugeSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		containerEl.createEl('h3', { text: 'Cursor' });
+		new Setting(containerEl).setName('Cursor').setHeading();
 
 		new Setting(containerEl)
 			.setName('줄 내 이동 문자')
@@ -112,7 +112,7 @@ export class FocusGaugeSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				}));
 
-		containerEl.createEl('h3', { text: 'Syntax Settings' });
+		new Setting(containerEl).setName('Syntax').setHeading();
 
 		new Setting(containerEl)
 			.setName('시작 문자')
@@ -150,7 +150,7 @@ export class FocusGaugeSettingTab extends PluginSettingTab {
 					this.plugin.refreshExtension();
 				}));
 
-		containerEl.createEl('h3', { text: 'Gauge Types' });
+		new Setting(containerEl).setName('Gauge types').setHeading();
 
 		this.plugin.settings.gaugeTypes.forEach((gaugeType, index) => {
 			new Setting(containerEl)
@@ -160,8 +160,9 @@ export class FocusGaugeSettingTab extends PluginSettingTab {
 					.setPlaceholder('Label (1 char)')
 					.setValue(gaugeType.label)
 					.onChange(async (value) => {
-						if (value.length <= 1 && this.plugin.settings.gaugeTypes[index]) {
-							this.plugin.settings.gaugeTypes[index]!.label = value.toUpperCase();
+						const current = this.plugin.settings.gaugeTypes[index];
+						if (value.length <= 1 && current) {
+							current.label = value.toUpperCase();
 							await this.plugin.saveSettings();
 							this.plugin.refreshExtension();
 						}
@@ -170,16 +171,18 @@ export class FocusGaugeSettingTab extends PluginSettingTab {
 					.setPlaceholder('Name')
 					.setValue(gaugeType.name)
 					.onChange(async (value) => {
-						if (this.plugin.settings.gaugeTypes[index]) {
-							this.plugin.settings.gaugeTypes[index]!.name = value;
+						const current = this.plugin.settings.gaugeTypes[index];
+						if (current) {
+							current.name = value;
 							await this.plugin.saveSettings();
 						}
 					}))
 				.addColorPicker(color => color
 					.setValue(gaugeType.color)
 					.onChange(async (value) => {
-						if (this.plugin.settings.gaugeTypes[index]) {
-							this.plugin.settings.gaugeTypes[index]!.color = value;
+						const current = this.plugin.settings.gaugeTypes[index];
+						if (current) {
+							current.color = value;
 							await this.plugin.saveSettings();
 							this.plugin.refreshExtension();
 						}

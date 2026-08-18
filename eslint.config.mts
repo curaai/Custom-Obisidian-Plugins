@@ -22,11 +22,23 @@ export default tseslint.config(
 		},
 	},
 	...obsidianmd.configs.recommended,
+	{
+		files: ["**/*.ts", "**/*.tsx"],
+		plugins: { obsidianmd },
+		rules: {
+			"obsidianmd/ui/sentence-case": ["error", {
+				enforceCamelCaseLower: true,
+				brands: ["Now", "Time Blocks", "Esc"],
+			}],
+		},
+	},
 	globalIgnores([
 		"node_modules",
 		"dist",
+		"build",
 		"esbuild.config.mjs",
 		"eslint.config.js",
+		"release.mjs",
 		"version-bump.mjs",
 		"versions.json",
 		"main.js",

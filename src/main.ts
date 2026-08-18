@@ -1,4 +1,4 @@
-import { Editor, Notice, Plugin, MarkdownView } from "obsidian";
+import { Editor, Notice, Plugin } from "obsidian";
 import {
 	Decoration,
 	DecorationSet,
@@ -102,7 +102,7 @@ function createFocusGaugePlugin(settings: FocusGaugeSettings) {
 
 export default class FocusGaugePlugin extends Plugin {
 	settings: FocusGaugeSettings;
-	private autoArchiveTimeout: NodeJS.Timeout | null = null;
+	private autoArchiveTimeout: ReturnType<typeof setTimeout> | null = null;
 	private findCharHandler: ((evt: KeyboardEvent) => void) | null = null;
 
 	async onload() {
@@ -115,14 +115,13 @@ export default class FocusGaugePlugin extends Plugin {
 			id: 'archive-time-blocks',
 			name: '시간 블록 정리 (Now / Time Blocks 분류)',
 			callback: () => {
-				archiveTimeBlocks(this.app, this.settings);
+				void archiveTimeBlocks(this.app, this.settings);
 			}
 		});
 
 		this.addCommand({
 			id: 'move-cursor-to-char',
 			name: '현재 줄에서 지정한 문자로 커서 이동',
-			hotkeys: [{ modifiers: ['Alt'], key: 'h' }],
 			editorCallback: (editor) => {
 				this.moveCursorToNavChar(editor);
 			}
@@ -135,7 +134,7 @@ export default class FocusGaugePlugin extends Plugin {
 						clearTimeout(this.autoArchiveTimeout);
 					}
 					this.autoArchiveTimeout = setTimeout(() => {
-						archiveTimeBlocks(this.app, this.settings, true);
+						void archiveTimeBlocks(this.app, this.settings, true);
 					}, 300);
 				}
 			})
@@ -147,7 +146,7 @@ export default class FocusGaugePlugin extends Plugin {
 					clearTimeout(this.autoArchiveTimeout);
 				}
 				this.autoArchiveTimeout = setTimeout(() => {
-					archiveTimeBlocks(this.app, this.settings, true);
+					void archiveTimeBlocks(this.app, this.settings, true);
 				}, 300);
 			}
 		});
@@ -251,17 +250,38 @@ export default class FocusGaugePlugin extends Plugin {
 			}
 
 			for (const textNode of nodes) {
-				const text = textNode.nodeValue!;
-				if (regex.test(text)) {
-					const span = document.createElement("span");
-					regex.lastIndex = 0;
-					span.innerHTML = text.replace(regex, (_, type, v) => {
-						const value = Math.min(Math.max(parseInt(v), 0), 10);
-						const color = typeColorMap.get(type) || '#888888';
-						return `<span class="focus-gauge focus-${type}" style="--value:${value}; --color:${color}"></span>`;
-					});
-					textNode.replaceWith(span);
+				const text = textNode.nodeValue ?? "";
+				regex.lastIndex = 0;
+				if (!regex.test(text)) {
+					continue;
 				}
+
+				regex.lastIndex = 0;
+				const fragment = document.createDocumentFragment();
+				let lastIndex = 0;
+				let match: RegExpExecArray | null;
+				while ((match = regex.exec(text)) !== null) {
+					if (match.index > lastIndex) {
+						fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+					}
+
+					const type = String(match[1] ?? "");
+					const rawValue = String(match[2] ?? "0");
+					const value = Math.min(Math.max(parseInt(rawValue, 10), 0), 10);
+					const color = typeColorMap.get(type) || "#888888";
+					const gauge = document.createElement("span");
+					gauge.className = `focus-gauge focus-${type}`;
+					gauge.style.setProperty("--value", String(value));
+					gauge.style.setProperty("--color", color);
+					fragment.appendChild(gauge);
+					lastIndex = match.index + match[0].length;
+				}
+
+				if (lastIndex < text.length) {
+					fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+				}
+
+				textNode.replaceWith(fragment);
 			}
 		});
 	}
@@ -271,7 +291,8 @@ export default class FocusGaugePlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const saved = (await this.loadData()) as Partial<FocusGaugeSettings> | undefined;
+		this.settings = { ...DEFAULT_SETTINGS, ...saved };
 	}
 
 	async saveSettings() {
